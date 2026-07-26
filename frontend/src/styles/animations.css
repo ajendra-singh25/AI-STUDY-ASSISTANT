@@ -1,0 +1,39 @@
+@keyframes aurora {
+
+    0%{
+        transform: translate(-20%, -20%) rotate(0deg);
+    }
+
+    50%{
+        transform: translate(20%, 10%) rotate(180deg);
+    }
+
+    100%{
+        transform: translate(-20%, -20%) rotate(360deg);
+    }
+
+}
+
+.aurora{
+
+    position:absolute;
+
+    width:700px;
+    height:700px;
+
+    background:linear-gradient(
+        45deg,
+        #06b6d4,
+        #2563eb,
+        #9333ea
+    );
+
+    filter:blur(140px);
+
+    opacity:.35;
+
+    border-radius:50%;
+
+    animation:aurora 20s linear infinite;
+
+}
