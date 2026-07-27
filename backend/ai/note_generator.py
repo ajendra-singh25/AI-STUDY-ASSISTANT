@@ -1,7 +1,8 @@
-from .llm import llm
+
 
 
 def generate_notes(text):
+    from .llm import llm
 
     prompt = f"""
 You are an expert study assistant.

@@ -1,11 +1,12 @@
 import json
 import re
 
-from .llm import llm
+
 from langchain_core.messages import HumanMessage
 
 
 def generate_flashcards(text):
+    from .llm import llm
 
     prompt = f"""
 You are an expert teacher.
