@@ -1,58 +1,29 @@
-import json
-import re
-
-
-from langchain_core.messages import HumanMessage
-
-
 def generate_quiz(text):
-    from .llm import llm
+
+    from .llm import client
 
     prompt = f"""
-You are an expert teacher.
-
-Generate exactly 10 multiple choice questions from the study material.
-
-Return ONLY valid JSON.
-
-Format:
-
-[
-  {{
-    "question":"...",
-    "options":[
-      "...",
-      "...",
-      "...",
-      "..."
-    ],
-    "answer":"..."
-  }}
-]
+Create a professional multiple-choice quiz from the following study material.
 
 Rules:
-- Exactly 10 questions
-- Exactly 4 options
-- One correct answer
-- No explanations
-- Return JSON only
+- Generate 10 MCQs.
+- Four options each.
+- Mention the correct answer after every question.
+- Use Markdown formatting.
 
 Study Material:
 
-{text[:12000]}
+{text}
 """
 
-    response = llm.invoke([HumanMessage(content=prompt)])
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ]
+    )
 
-    content = response.content.strip()
-
-    # Remove markdown if present
-    content = content.replace("```json", "")
-    content = content.replace("```", "")
-
-    # Remove invisible control characters
-    content = re.sub(r"[\x00-\x1F\x7F]", "", content)
-
-    print(content)
-
-    return json.loads(content)
+    return response.choices[0].message.content

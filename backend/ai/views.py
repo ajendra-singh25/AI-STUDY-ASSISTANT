@@ -10,7 +10,6 @@ from .rag import create_vector_store, search_pdf
 from django.http import JsonResponse
 from .prompts import NOTES_PROMPT
 from .rag import search_pdf
-from langchain_core.messages import HumanMessage
 
 class ExtractPDFTextView(APIView):
 
@@ -39,7 +38,7 @@ class ExtractPDFTextView(APIView):
 class SearchPDFView(APIView):
 
     def get(self, request, pk):
-        from .llm import llm
+        from .llm import client
 
         question = request.GET.get("q")
 
@@ -77,20 +76,28 @@ User Question
 
 {question}
 """
-        response = llm.invoke([HumanMessage(content=prompt)])
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {
+            "role": "user",
+            "content": prompt
+                }
+            ]
+        )
 
         document = Document.objects.get(id=pk)
 
         return Response({
             "pdf": document.title,
             "question": question,
-            "answer": response.content,
+            "answer": response.choices[0].message.content,
             "sources": [doc.page_content for doc in docs]
         })
 class GenerateNotesView(APIView):
 
     def get(self, request, pk):
-        from .llm import llm
+        from .llm import client
 
         document = Document.objects.get(id=pk)
 
@@ -124,13 +131,19 @@ DOCUMENT
 {context}
 """
 
-        response = llm.invoke(
-            [HumanMessage(content=prompt)]
-        )
+        response = client.chat.completions.create(
+    model="llama-3.3-70b-versatile",
+    messages=[
+        {
+            "role": "user",
+            "content": prompt
+        }
+    ]
+)
 
         return Response({
             "title": document.title,
-            "notes": response.content
+            "notes": response.choices[0].message.content
         })
 class GenerateQuizView(APIView):
 

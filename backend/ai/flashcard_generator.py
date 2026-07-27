@@ -1,43 +1,29 @@
-import json
-import re
-
-
-from langchain_core.messages import HumanMessage
-
-
 def generate_flashcards(text):
-    from .llm import llm
+
+    from .llm import client
 
     prompt = f"""
-You are an expert teacher.
+Create professional flashcards.
 
-Generate 5 flashcards.
+Rules:
+- One question
+- One answer
+- Easy to revise
+- Markdown format
 
-Return ONLY JSON.
+Content:
 
-Format:
-
-[
- {{
-   "question":"...",
-   "answer":"..."
- }}
-]
-
-Study Material:
-
-{text[:6000]}
+{text}
 """
 
-    response = llm.invoke(
-        [HumanMessage(content=prompt)]
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ]
     )
 
-    content = response.content.strip()
-
-    content = content.replace("```json", "")
-    content = content.replace("```", "")
-
-    content = re.sub(r"[\x00-\x1F\x7F]", "", content)
-
-    return json.loads(content)
+    return response.choices[0].message.content
