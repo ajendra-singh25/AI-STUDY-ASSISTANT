@@ -3,27 +3,32 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import FAISS
-from langchain_huggingface import HuggingFaceEmbeddings
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 embeddings = None
 
+
 def get_embeddings():
     global embeddings
+
     if embeddings is None:
+        from langchain_huggingface import HuggingFaceEmbeddings
+
         embeddings = HuggingFaceEmbeddings(
             model_name="sentence-transformers/all-MiniLM-L6-v2"
         )
+
+
     return embeddings
 
 
 def create_vector_store(text, pdf_id):
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+    from langchain_community.vectorstores import FAISS
     if not text.strip():
         raise ValueError("No text was extracted from the PDF.")
-
+   
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,
         chunk_overlap=200,
@@ -46,6 +51,7 @@ def create_vector_store(text, pdf_id):
 
 
 def search_pdf(pdf_id, question):
+    from langchain_community.vectorstores import FAISS
     vector_store = FAISS.load_local(
         f"vector_db/pdf_{pdf_id}",
         get_embeddings(),

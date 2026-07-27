@@ -6,7 +6,6 @@ from documents.models import Document
 from .quiz_generator import generate_quiz
 from .flashcard_generator import generate_flashcards
 from .pdf_processor import extract_text_from_pdf
-from .rag import create_vector_store, search_pdf
 from django.http import JsonResponse
 from .prompts import NOTES_PROMPT
 from .rag import search_pdf
@@ -14,6 +13,7 @@ from .rag import search_pdf
 class ExtractPDFTextView(APIView):
 
     def get(self, request, pk):
+        from .rag import create_vector_store
 
         document = Document.objects.get(id=pk)
 
@@ -38,6 +38,7 @@ class ExtractPDFTextView(APIView):
 class SearchPDFView(APIView):
 
     def get(self, request, pk):
+        from .rag import search_pdf
         from .llm import client
 
         question = request.GET.get("q")
@@ -97,6 +98,7 @@ User Question
 class GenerateNotesView(APIView):
 
     def get(self, request, pk):
+        from .rag import search_pdf
         from .llm import client
 
         document = Document.objects.get(id=pk)
