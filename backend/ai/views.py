@@ -1,4 +1,4 @@
-from .llm import llm
+
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from .note_generator import generate_notes
@@ -39,6 +39,7 @@ class ExtractPDFTextView(APIView):
 class SearchPDFView(APIView):
 
     def get(self, request, pk):
+        from .llm import llm
 
         question = request.GET.get("q")
 
@@ -89,6 +90,7 @@ User Question
 class GenerateNotesView(APIView):
 
     def get(self, request, pk):
+        from .llm import llm
 
         document = Document.objects.get(id=pk)
 

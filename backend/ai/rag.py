@@ -9,10 +9,15 @@ from langchain_huggingface import HuggingFaceEmbeddings
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
+embeddings = None
 
-embeddings = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/all-MiniLM-L6-v2"
-)
+def get_embeddings():
+    global embeddings
+    if embeddings is None:
+        embeddings = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2"
+        )
+    return embeddings
 
 
 def create_vector_store(text, pdf_id):
@@ -30,7 +35,7 @@ def create_vector_store(text, pdf_id):
 
     vector_store = FAISS.from_texts(
         texts=chunks,
-        embedding=embeddings,
+        embedding=get_embeddings(),
     )
 
     os.makedirs("vector_db", exist_ok=True)
@@ -43,7 +48,7 @@ def create_vector_store(text, pdf_id):
 def search_pdf(pdf_id, question):
     vector_store = FAISS.load_local(
         f"vector_db/pdf_{pdf_id}",
-        embeddings,
+        get_embeddings(),
         allow_dangerous_deserialization=True,
     )
     docs = vector_store.similarity_search(
