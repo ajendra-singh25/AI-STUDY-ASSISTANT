@@ -143,7 +143,7 @@ SIMPLE_JWT = {
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
 }
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
+    "https://ai-study-assistant-1-o2d8.onrender.com",
 ]
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 MEDIA_URL = "/media/"
