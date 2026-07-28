@@ -23,7 +23,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-b2mc7wp1i*9d9n#_fbjddtf2=duw5^i5*c8#9ldj+b*d-ke%il'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
 ALLOWED_HOSTS = ["ai-study-assistant-boc3.onrender.com",
                  "localhost",
@@ -126,6 +126,7 @@ USE_TZ = True
 
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 from datetime import timedelta
 
 REST_FRAMEWORK = {

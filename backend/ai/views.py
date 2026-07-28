@@ -8,7 +8,7 @@ from .flashcard_generator import generate_flashcards
 from .pdf_processor import extract_text_from_pdf
 from django.http import JsonResponse
 from .prompts import NOTES_PROMPT
-from .rag import search_pdf
+
 
 class ExtractPDFTextView(APIView):
 

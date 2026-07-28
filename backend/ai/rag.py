@@ -3,32 +3,24 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
-embeddings = None
 
+from langchain_openai import OpenAIEmbeddings
+from langchain_community.vectorstores import FAISS
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-def get_embeddings():
-    global embeddings
-
-    if embeddings is None:
-        from langchain_huggingface import HuggingFaceEmbeddings
-
-        embeddings = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2"
-        )
-
-
-    return embeddings
+embeddings = OpenAIEmbeddings(
+    model="text-embedding-3-small",
+    api_key=os.getenv("OPENAI_API_KEY"),
+)
 
 
 def create_vector_store(text, pdf_id):
-    from langchain_text_splitters import RecursiveCharacterTextSplitter
-    from langchain_community.vectorstores import FAISS
+
     if not text.strip():
-        raise ValueError("No text was extracted from the PDF.")
-   
+        raise ValueError("No text extracted")
+
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,
         chunk_overlap=200,
@@ -36,11 +28,9 @@ def create_vector_store(text, pdf_id):
 
     chunks = splitter.split_text(text)
 
-    print("Number of chunks:", len(chunks))
-
     vector_store = FAISS.from_texts(
         texts=chunks,
-        embedding=get_embeddings(),
+        embedding=embeddings,
     )
 
     os.makedirs("vector_db", exist_ok=True)
@@ -51,15 +41,14 @@ def create_vector_store(text, pdf_id):
 
 
 def search_pdf(pdf_id, question):
-    from langchain_community.vectorstores import FAISS
+
     vector_store = FAISS.load_local(
         f"vector_db/pdf_{pdf_id}",
-        get_embeddings(),
+        embeddings,
         allow_dangerous_deserialization=True,
     )
-    docs = vector_store.similarity_search(
-    question,
-    k=6,
-)
 
-    return docs
+    return vector_store.similarity_search(
+        question,
+        k=6,
+    )
