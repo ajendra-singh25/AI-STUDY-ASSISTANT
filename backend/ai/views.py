@@ -41,16 +41,37 @@ class SearchPDFView(APIView):
         from .rag import search_pdf
         from .llm import client
 
-        question = request.GET.get("q")
+        question = request.GET.get("q", "").strip()
 
         if not question:
-            return Response({"error": "Please provide a question using ?q="}, status=400)
+            return Response(
+                {"error": "Please provide a question using ?q="},
+                status=400
+            )
 
-        docs = search_pdf(pk, question)
+        try:
 
-        context = "\n\n".join([doc.page_content for doc in docs])
+            document = Document.objects.get(id=pk)
 
-        prompt = f"""
+            docs = search_pdf(
+                document.id,
+                question
+            )
+
+            if not docs:
+                return Response({
+                    "pdf": document.title,
+                    "question": question,
+                    "answer": "I couldn't find the answer in the uploaded PDF.",
+                    "sources": []
+                })
+
+            context = "\n\n".join(
+                doc.page_content
+                for doc in docs
+            )
+
+            prompt = f"""
 You are a professional AI Study Assistant.
 
 Use ONLY the provided context to answer.
@@ -60,41 +81,75 @@ Instructions:
 - Explain in simple language.
 - Use bullet points whenever appropriate.
 - If there are mathematical steps, solve them step-by-step.
-- If the context contains a question, solve it completely.
 - Do not invent information.
 - If the answer is missing, reply exactly:
 "I couldn't find the answer in the uploaded PDF."
 
 ======================
-PDF Context
+PDF CONTEXT
 ======================
 
 {context}
 
 ======================
-User Question
+USER QUESTION
 ======================
 
 {question}
 """
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
+
+            response = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                temperature=0.2,
+                max_tokens=800,
+            )
+
+            return Response({
+                "pdf": document.title,
+                "question": question,
+                "answer": response.choices[0].message.content,
+                "sources": [
+                    doc.page_content
+                    for doc in docs
+                ]
+            })
+
+        except Document.DoesNotExist:
+
+            return Response(
+                {"error": "Document not found."},
+                status=404
+            )
+
+        except FileNotFoundError as e:
+
+            return Response(
                 {
-            "role": "user",
-            "content": prompt
-                }
-            ]
-        )
+                    "error": str(e),
+                    "code": "VECTOR_STORE_NOT_FOUND"
+                },
+                status=404
+            )
 
-        document = Document.objects.get(id=pk)
+        except Exception as e:
 
-        return Response({
-            "pdf": document.title,
-            "question": question,
-            "answer": response.choices[0].message.content,
-            "sources": [doc.page_content for doc in docs]
-        })
+            print(
+                f"AI SEARCH ERROR for PDF {pk}: {repr(e)}"
+            )
+
+            return Response(
+                {
+                    "error": "AI search failed.",
+                    "details": str(e)
+                },
+                status=500
+            )
 class GenerateNotesView(APIView):
 
     def get(self, request, pk):
