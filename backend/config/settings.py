@@ -30,12 +30,9 @@ if not SECRET_KEY:
 DEBUG = False
 
 ALLOWED_HOSTS = [
-    host.strip()
-    for host in os.environ.get(
-        "ALLOWED_HOSTS",
-        "ai-study-assistant-1-o2d8.onrender.com,localhost,127.0.0.1",
-    ).split(",")
-    if host.strip()
+    "ai-study-assistant-boc3.onrender.com",
+    "localhost",
+    "127.0.0.1",
 ]
 
 
@@ -161,3 +158,6 @@ CORS_ALLOWED_ORIGINS = [
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+CSRF_TRUSTED_ORIGINS = [
+    "https://ai-study-assistant-boc3.onrender.com",
+]
