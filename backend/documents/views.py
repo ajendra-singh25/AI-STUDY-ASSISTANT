@@ -1,44 +1,56 @@
+
+import logging
 import threading
 
 from rest_framework import generics, permissions, status
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
 from .models import Document
 from .serializers import DocumentSerializer
 
+logger = logging.getLogger(__name__)
+
 
 class DocumentUploadView(generics.CreateAPIView):
     serializer_class = DocumentSerializer
     permission_classes = [permissions.IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
-
-        if not serializer.is_valid():
-            return Response(
-                serializer.errors,
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        serializer.is_valid(raise_exception=True)
 
         document = serializer.save(user=request.user)
 
-        # Process PDF after upload in a background thread
+        # Process the uploaded PDF in the background.
         thread = threading.Thread(
             target=self.process_document,
             args=(document.id,),
-            daemon=True
+            daemon=True,
         )
         thread.start()
 
+        document_data = DocumentSerializer(
+            document,
+            context={"request": request},
+        ).data
+
         return Response(
             {
-                "message": "PDF uploaded successfully. Processing started.",
-                "document": serializer.data
+                "message": (
+                    "PDF uploaded successfully. "
+                    "Document processing has started."
+                ),
+                "id": document.id,
+                "title": document.title,
+                "document": document_data,
             },
-            status=status.HTTP_201_CREATED
+            status=status.HTTP_201_CREATED,
         )
 
-    def process_document(self, document_id):
+    @staticmethod
+    def process_document(document_id):
         try:
             from ai.pdf_processor import extract_text_from_pdf
             from ai.rag import create_vector_store
@@ -46,43 +58,47 @@ class DocumentUploadView(generics.CreateAPIView):
             document = Document.objects.get(id=document_id)
 
             if not document.pdf:
-                print(f"PDF {document_id}: PDF file not found")
+                logger.error(
+                    "Document %s has no PDF file.",
+                    document_id,
+                )
                 return
 
-            pdf_path = document.pdf.path
+            logger.info(
+                "Processing PDF document %s.",
+                document_id,
+            )
 
-            print(f"PDF {document_id}: Processing started")
-            print(f"PDF PATH: {pdf_path}")
-
-            text = extract_text_from_pdf(pdf_path)
+            text = extract_text_from_pdf(document.pdf.path)
 
             if not text or not text.strip():
-                print(f"PDF {document_id}: No text extracted")
+                logger.error(
+                    "No extractable text found in document %s.",
+                    document_id,
+                )
                 return
-
-            print(
-                f"PDF {document_id}: "
-                f"Extracted {len(text)} characters"
-            )
 
             chunks = create_vector_store(
                 text,
-                document.id
+                document.id,
             )
 
-            print(
-                f"PDF {document_id}: "
-                f"Vector store created successfully "
-                f"with {chunks} chunks"
+            logger.info(
+                "Document %s processed into %s chunks.",
+                document_id,
+                chunks,
             )
 
         except Document.DoesNotExist:
-            print(f"PDF {document_id}: Document does not exist")
+            logger.exception(
+                "Document %s does not exist.",
+                document_id,
+            )
 
-        except Exception as e:
-            print(
-                f"PDF {document_id}: "
-                f"Background processing failed: {e}"
+        except Exception:
+            logger.exception(
+                "Background PDF processing failed for document %s.",
+                document_id,
             )
 
 
@@ -114,10 +130,12 @@ class DashboardStatsView(generics.GenericAPIView):
             user=request.user
         ).count()
 
-        return Response({
-            "pdfs": total_pdfs,
-            "notes": total_pdfs,
-            "quizzes": total_pdfs,
-            "flashcards": total_pdfs,
-            "chats": total_pdfs,
-        })
+        return Response(
+            {
+                "pdfs": total_pdfs,
+                "notes": total_pdfs,
+                "quizzes": total_pdfs,
+                "flashcards": total_pdfs,
+                "chats": total_pdfs,
+            }
+        )

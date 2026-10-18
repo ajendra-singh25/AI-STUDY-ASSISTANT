@@ -11,24 +11,32 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-b2mc7wp1i*9d9n#_fbjddtf2=duw5^i5*c8#9ldj+b*d-ke%il'
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "")
+if not SECRET_KEY:
+    raise RuntimeError("DJANGO_SECRET_KEY is not configured.")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = False
 
-ALLOWED_HOSTS = ["ai-study-assistant-boc3.onrender.com",
-                 "localhost",
-                 "127.0.0.1",
-                 ]
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.environ.get(
+        "ALLOWED_HOSTS",
+        "ai-study-assistant-1-o2d8.onrender.com,localhost,127.0.0.1",
+    ).split(",")
+    if host.strip()
+]
 
 
 # Application definition
@@ -143,7 +151,12 @@ SIMPLE_JWT = {
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
 }
 CORS_ALLOWED_ORIGINS = [
-    "https://ai-study-assistant-1-o2d8.onrender.com",
+    origin.strip().rstrip("/")
+    for origin in os.environ.get(
+        "CORS_ALLOWED_ORIGINS",
+        "https://ai-study-assistant-1-o2d8.onrender.com",
+    ).split(",")
+    if origin.strip()
 ]
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 MEDIA_URL = "/media/"
