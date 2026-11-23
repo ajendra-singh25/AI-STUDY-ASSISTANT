@@ -1,15 +1,23 @@
+
+from .llm import client
+
+
 def generate_flashcards(text):
 
-    from .llm import client
+    if not text or not text.strip():
+        raise ValueError("Study material is empty.")
 
     prompt = f"""
-Create professional flashcards.
+Create exactly 10 professional study flashcards.
 
 Rules:
-- One question
-- One answer
-- Easy to revise
-- Markdown format
+- Each flashcard must have one question and one answer.
+- Keep questions short and clear.
+- Answers should be simple and easy to revise.
+- Use only the supplied study material.
+- Do not invent information.
+- Format using Markdown.
+- Number each flashcard.
 
 Content:
 
@@ -19,11 +27,15 @@ Content:
     response = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ]
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.3,
+        max_tokens=1200,
     )
 
-    return response.choices[0].message.content
+    result = response.choices[0].message.content
+
+    if not result:
+        raise ValueError("Groq returned empty flashcards.")
+
+    return result.strip()

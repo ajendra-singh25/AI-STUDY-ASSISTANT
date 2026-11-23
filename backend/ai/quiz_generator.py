@@ -1,15 +1,22 @@
+
+from .llm import client
+
+
 def generate_quiz(text):
 
-    from .llm import client
+    if not text or not text.strip():
+        raise ValueError("Study material is empty.")
 
     prompt = f"""
 Create a professional multiple-choice quiz from the following study material.
 
 Rules:
-- Generate 10 MCQs.
-- Four options each.
-- Mention the correct answer after every question.
-- Use Markdown formatting.
+- Generate exactly 10 MCQs.
+- Each question must have exactly four options.
+- Clearly mention the correct answer after every question.
+- Keep questions relevant to the supplied material.
+- Do not invent facts.
+- Use clean Markdown formatting.
 
 Study Material:
 
@@ -19,11 +26,15 @@ Study Material:
     response = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ]
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.3,
+        max_tokens=1500,
     )
 
-    return response.choices[0].message.content
+    result = response.choices[0].message.content
+
+    if not result:
+        raise ValueError("Groq returned an empty quiz.")
+
+    return result.strip()
