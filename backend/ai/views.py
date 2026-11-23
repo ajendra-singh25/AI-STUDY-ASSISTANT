@@ -150,6 +150,7 @@ USER QUESTION
                 },
                 status=500
             )
+
 class GenerateNotesView(APIView):
 
     def get(self, request, pk):
@@ -202,34 +203,90 @@ DOCUMENT
             "title": document.title,
             "notes": response.choices[0].message.content
         })
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 class GenerateQuizView(APIView):
 
     def get(self, request, pk):
+        try:
+            document = Document.objects.get(id=pk)
 
-        document = Document.objects.get(id=pk)
+            text = extract_text_from_pdf(document.pdf.path)
 
-        text = extract_text_from_pdf(document.pdf.path)
+            if not text or not text.strip():
+                return Response(
+                    {"error": "No readable text found in this PDF."},
+                    status=400
+                )
 
-        quiz = generate_quiz(text[:12000])
+            quiz = generate_quiz(text[:12000])
 
-        return Response({
-            "title": document.title,
-            "quiz": quiz
-        })
+            if not quiz:
+                return Response(
+                    {"error": "Quiz generation returned an empty result."},
+                    status=502
+                )
+
+            return Response({
+                "title": document.title,
+                "quiz": quiz
+            })
+
+        except Document.DoesNotExist:
+            return Response({"error": "Document not found."}, status=404)
+
+        except Exception:
+            logger.exception("QUIZ GENERATION FAILED for PDF %s", pk)
+            return Response(
+                {"error": "Quiz generation failed. Check Render logs."},
+                status=500
+            )
+
+
+
 class GenerateFlashcardsView(APIView):
 
     def get(self, request, pk):
+        try:
+            document = Document.objects.get(id=pk)
 
-        document = Document.objects.get(id=pk)
+            print("FLASHCARD DEBUG: Document found:", document.title)
 
-        text = extract_text_from_pdf(document.pdf.path)
+            text = extract_text_from_pdf(document.pdf.path)
 
-        flashcards = generate_flashcards(text[:12000])
+            print("FLASHCARD DEBUG: Extracted text length:", len(text))
 
-        return Response({
-            "title": document.title,
-            "flashcards": flashcards
-        })
+            if not text or not text.strip():
+                return Response(
+                    {"error": "No readable text found in PDF."},
+                    status=400
+                )
+
+            flashcards = generate_flashcards(text[:12000])
+
+            print("FLASHCARD DEBUG: Generation successful")
+
+            return Response({
+                "title": document.title,
+                "flashcards": flashcards
+            })
+
+        except Exception as e:
+            import traceback
+
+            print("FLASHCARD ERROR:", repr(e))
+            traceback.print_exc()
+
+            return Response(
+                {"error": str(e)},
+                status=500
+            )
+
+
 class DashboardStatsView(APIView):
 
     def get(self, request):
