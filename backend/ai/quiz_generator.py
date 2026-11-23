@@ -1,5 +1,5 @@
 
-from .llm import client
+from .llm import client, MODEL_NAME
 
 
 def generate_quiz(text):
@@ -24,7 +24,7 @@ Study Material:
 """
 
     response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model=MODEL_NAME,
         messages=[
             {"role": "user", "content": prompt}
         ],
