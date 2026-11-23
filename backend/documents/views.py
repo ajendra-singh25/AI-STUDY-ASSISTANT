@@ -2,6 +2,8 @@
 import logging
 import threading
 
+from django.db import close_old_connections, transaction
+
 from rest_framework import generics, permissions, status
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
@@ -23,18 +25,18 @@ class DocumentUploadView(generics.CreateAPIView):
 
         document = serializer.save(user=request.user)
 
-        # Process the uploaded PDF in the background.
-        thread = threading.Thread(
-            target=self.process_document,
-            args=(document.id,),
-            daemon=True,
-        )
-        thread.start()
+        # Start processing only after the database transaction commits.
+        def start_processing():
+            thread = threading.Thread(
+                target=self.process_document,
+                args=(document.id,),
+                daemon=True,
+            )
+            thread.start()
 
-        document_data = DocumentSerializer(
-            document,
-            context={"request": request},
-        ).data
+        transaction.on_commit(start_processing)
+
+        document_data = self.get_serializer(document).data
 
         return Response(
             {
@@ -51,6 +53,9 @@ class DocumentUploadView(generics.CreateAPIView):
 
     @staticmethod
     def process_document(document_id):
+        # Ensure this thread uses fresh database connections.
+        close_old_connections()
+
         try:
             from ai.pdf_processor import extract_text_from_pdf
             from ai.rag import create_vector_store
@@ -65,15 +70,25 @@ class DocumentUploadView(generics.CreateAPIView):
                 return
 
             logger.info(
-                "Processing PDF document %s.",
+                "Starting PDF processing for document %s.",
                 document_id,
             )
 
-            text = extract_text_from_pdf(document.pdf.path)
+            # This requires a storage backend that provides local file paths.
+            try:
+                pdf_path = document.pdf.path
+            except (NotImplementedError, ValueError) as error:
+                logger.exception(
+                    "Local PDF path unavailable for document %s.",
+                    document_id,
+                )
+                return
+
+            text = extract_text_from_pdf(pdf_path)
 
             if not text or not text.strip():
                 logger.error(
-                    "No extractable text found in document %s.",
+                    "No readable text found in document %s.",
                     document_id,
                 )
                 return
@@ -84,22 +99,25 @@ class DocumentUploadView(generics.CreateAPIView):
             )
 
             logger.info(
-                "Document %s processed into %s chunks.",
+                "Document %s successfully processed into %s chunks.",
                 document_id,
                 chunks,
             )
 
         except Document.DoesNotExist:
-            logger.exception(
-                "Document %s does not exist.",
+            logger.warning(
+                "Document %s was deleted before processing.",
                 document_id,
             )
 
         except Exception:
             logger.exception(
-                "Background PDF processing failed for document %s.",
+                "PDF processing failed for document %s.",
                 document_id,
             )
+
+        finally:
+            close_old_connections()
 
 
 class DocumentListView(generics.ListAPIView):
@@ -109,7 +127,7 @@ class DocumentListView(generics.ListAPIView):
     def get_queryset(self):
         return Document.objects.filter(
             user=self.request.user
-        ).order_by("-id")
+        ).order_by("-uploaded_at")
 
 
 class DocumentDeleteView(generics.DestroyAPIView):
@@ -133,9 +151,9 @@ class DashboardStatsView(generics.GenericAPIView):
         return Response(
             {
                 "pdfs": total_pdfs,
-                "notes": total_pdfs,
-                "quizzes": total_pdfs,
-                "flashcards": total_pdfs,
-                "chats": total_pdfs,
+                "notes": 0,
+                "quizzes": 0,
+                "flashcards": 0,
+                "chats": 0,
             }
         )

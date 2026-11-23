@@ -12,11 +12,22 @@ const api = axios.create({
 
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem("access");
+    const url = (config.url || "")
+      .replace(/^\/+/, "")
+      .split("?")[0]
+      .replace(/^api\//, "");
 
-    if (token) {
-      config.headers = config.headers || {};
-      config.headers.Authorization = `Bearer ${token}`;
+    // Do not attach JWT tokens to public authentication endpoints
+    const isPublicAuthEndpoint =
+      /^accounts\/(register|login)\/?$/.test(url);
+
+    if (!isPublicAuthEndpoint) {
+      const token = localStorage.getItem("access");
+
+      if (token) {
+        config.headers = config.headers || {};
+        config.headers.Authorization = `Bearer ${token}`;
+      }
     }
 
     return config;

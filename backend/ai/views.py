@@ -1,100 +1,166 @@
-from .llm import client, MODEL_NAME
-from rest_framework.views import APIView
+
+import logging
+
+from rest_framework import permissions, status
 from rest_framework.response import Response
-from .note_generator import generate_notes
+from rest_framework.views import APIView
+
 from documents.models import Document
+
+from .llm import client, MODEL_NAME
+from .note_generator import generate_notes
 from .quiz_generator import generate_quiz
 from .flashcard_generator import generate_flashcards
 from .pdf_processor import extract_text_from_pdf
-from django.http import JsonResponse
-from .prompts import NOTES_PROMPT
 
+logger = logging.getLogger(__name__)
+
+
+# --------------------------------------------------
+# COMMON HELPERS
+# --------------------------------------------------
+
+def get_user_document(request, pk):
+    """
+    Return a document only if it belongs to the logged-in user.
+    """
+    return Document.objects.get(
+        id=pk,
+        user=request.user,
+    )
+
+
+def extract_document_text(document):
+    """
+    Extract readable text from an uploaded PDF.
+    """
+    if not document.pdf:
+        raise ValueError("No PDF file is associated with this document.")
+
+    return extract_text_from_pdf(document.pdf.path)
+
+
+# --------------------------------------------------
+# EXTRACT PDF TEXT AND CREATE VECTOR STORE
+# --------------------------------------------------
 
 class ExtractPDFTextView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, pk):
         from .rag import create_vector_store
 
-        document = Document.objects.get(id=pk)
+        try:
+            document = get_user_document(request, pk)
 
-        text = extract_text_from_pdf(document.pdf.path)
+            text = extract_document_text(document)
 
-        print("=" * 50)
-        print("PDF PATH:", document.pdf.path)
-        print("TEXT LENGTH:", len(text))
-        print("FIRST 500 CHARACTERS:")
-        print(text[:500])
-        print("=" * 50)
+            if not text or not text.strip():
+                return Response(
+                    {"error": "No readable text found in this PDF."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-        chunks = create_vector_store(text, document.id)
+            chunks = create_vector_store(text, document.id)
 
-        return Response({
-            "title": document.title,
-            "chunks_created": chunks,
-            "message": "Vector Database Created Successfully"
-        })
+            return Response({
+                "title": document.title,
+                "chunks_created": chunks,
+                "message": "Vector Database Created Successfully",
+            })
 
+        except Document.DoesNotExist:
+            return Response(
+                {"error": "Document not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        except FileNotFoundError:
+            logger.exception(
+                "PDF file not found for document %s",
+                pk,
+            )
+            return Response(
+                {"error": "PDF file not found. Please upload it again."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        except ValueError as error:
+            return Response(
+                {"error": str(error)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        except Exception:
+            logger.exception(
+                "PDF extraction or vector-store creation failed for document %s",
+                pk,
+            )
+            return Response(
+                {"error": "PDF processing failed. Please try again."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+# --------------------------------------------------
+# SEARCH PDF USING RAG
+# --------------------------------------------------
 
 class SearchPDFView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, pk):
         from .rag import search_pdf
-        from .llm import client
 
-        question = request.GET.get("q", "").strip()
+        question = request.query_params.get("q", "").strip()
 
         if not question:
             return Response(
                 {"error": "Please provide a question using ?q="},
-                status=400
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
-
-            document = Document.objects.get(id=pk)
+            document = get_user_document(request, pk)
 
             docs = search_pdf(
                 document.id,
-                question
+                question,
+                k=4,
             )
 
             if not docs:
                 return Response({
                     "pdf": document.title,
                     "question": question,
-                    "answer": "I couldn't find the answer in the uploaded PDF.",
-                    "sources": []
+                    "answer": (
+                        "I couldn't find the answer in the uploaded PDF."
+                    ),
+                    "sources": [],
                 })
 
             context = "\n\n".join(
-                doc.page_content
-                for doc in docs
+                doc.page_content for doc in docs
             )
 
             prompt = f"""
 You are a professional AI Study Assistant.
 
-Use ONLY the provided context to answer.
+Use ONLY the provided PDF context to answer the question.
 
 Instructions:
-- Give a complete answer.
-- Explain in simple language.
+- Give a complete and accurate answer.
+- Explain concepts in simple language.
 - Use bullet points whenever appropriate.
-- If there are mathematical steps, solve them step-by-step.
+- Explain mathematical steps clearly.
 - Do not invent information.
-- If the answer is missing, reply exactly:
+- If the answer is missing from the context, reply exactly:
 "I couldn't find the answer in the uploaded PDF."
 
-======================
-PDF CONTEXT
-======================
-
+PDF CONTEXT:
 {context}
 
-======================
-USER QUESTION
-======================
-
+USER QUESTION:
 {question}
 """
 
@@ -102,203 +168,281 @@ USER QUESTION
                 model=MODEL_NAME,
                 messages=[
                     {
+                        "role": "system",
+                        "content": (
+                            "You are an accurate academic assistant. "
+                            "Answer only from the supplied PDF context."
+                        ),
+                    },
+                    {
                         "role": "user",
-                        "content": prompt
-                    }
+                        "content": prompt,
+                    },
                 ],
                 temperature=0.2,
-                max_tokens=800,
+                max_completion_tokens=800,
             )
+
+            if not response.choices:
+                raise RuntimeError("The AI returned no response.")
+
+            answer = response.choices[0].message.content
+
+            if not answer or not answer.strip():
+                raise RuntimeError("The AI returned an empty answer.")
 
             return Response({
                 "pdf": document.title,
                 "question": question,
-                "answer": response.choices[0].message.content,
+                "answer": answer.strip(),
                 "sources": [
-                    doc.page_content
-                    for doc in docs
-                ]
+                    doc.page_content for doc in docs
+                ],
             })
 
         except Document.DoesNotExist:
-
             return Response(
                 {"error": "Document not found."},
-                status=404
+                status=status.HTTP_404_NOT_FOUND,
             )
 
-        except FileNotFoundError as e:
-
+        except FileNotFoundError:
+            logger.exception(
+                "Vector store missing for PDF %s",
+                pk,
+            )
             return Response(
                 {
-                    "error": str(e),
-                    "code": "VECTOR_STORE_NOT_FOUND"
+                    "error": (
+                        "PDF vector database not found. "
+                        "Process the PDF again."
+                    ),
+                    "code": "VECTOR_STORE_NOT_FOUND",
                 },
-                status=404
+                status=status.HTTP_404_NOT_FOUND,
             )
 
-        except Exception as e:
-
-            print(
-                f"AI SEARCH ERROR for PDF {pk}: {repr(e)}"
-            )
-
+        except Exception:
+            logger.exception("AI search failed for PDF %s", pk)
             return Response(
-                {
-                    "error": "AI search failed.",
-                    "details": str(e)
-                },
-                status=500
+                {"error": "AI search failed. Please try again."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+
+# --------------------------------------------------
+# GENERATE STUDY NOTES
+# --------------------------------------------------
 
 class GenerateNotesView(APIView):
-
-    def get(self, request, pk):
-        from .rag import search_pdf
-        from .llm import client
-
-        document = Document.objects.get(id=pk)
-
-        docs = search_pdf(
-            document.id,
-            "Generate complete study notes from this document."
-        )
-
-        context = "\n\n".join(
-            [doc.page_content for doc in docs]
-        )
-
-        prompt = f"""
-You are an expert study assistant.
-
-Using ONLY the following document, generate professional study notes.
-
-Instructions:
-
-- Use headings.
-- Use bullet points.
-- Explain concepts simply.
-- Highlight important definitions.
-- Mention formulas if available.
-- Include examples whenever possible.
-- Format beautifully in Markdown.
-- Do not invent information.
-
-DOCUMENT
-
-{context}
-"""
-
-        response = client.chat.completions.create(
-    model=MODEL_NAME,
-    messages=[
-        {
-            "role": "user",
-            "content": prompt
-        }
-    ]
-)
-
-        return Response({
-            "title": document.title,
-            "notes": response.choices[0].message.content
-        })
-
-import logging
-
-logger = logging.getLogger(__name__)
-
-
-class GenerateQuizView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, pk):
         try:
-            document = Document.objects.get(id=pk)
+            document = get_user_document(request, pk)
 
-            text = extract_text_from_pdf(document.pdf.path)
+            text = extract_document_text(document)
 
             if not text or not text.strip():
                 return Response(
                     {"error": "No readable text found in this PDF."},
-                    status=400
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            notes = generate_notes(text)
+
+            if not notes or not notes.strip():
+                return Response(
+                    {"error": "Note generation returned an empty result."},
+                    status=status.HTTP_502_BAD_GATEWAY,
+                )
+
+            return Response({
+                "title": document.title,
+                "notes": notes.strip(),
+            })
+
+        except Document.DoesNotExist:
+            return Response(
+                {"error": "Document not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        except FileNotFoundError:
+            logger.exception(
+                "PDF file not found for notes, document %s",
+                pk,
+            )
+            return Response(
+                {"error": "PDF file not found. Please upload it again."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        except ValueError as error:
+            return Response(
+                {"error": str(error)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        except Exception:
+            logger.exception("Note generation failed for PDF %s", pk)
+            return Response(
+                {"error": "Note generation failed. Please try again."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+# --------------------------------------------------
+# GENERATE QUIZ
+# --------------------------------------------------
+
+class GenerateQuizView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            document = get_user_document(request, pk)
+
+            text = extract_document_text(document)
+
+            if not text or not text.strip():
+                return Response(
+                    {"error": "No readable text found in this PDF."},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
 
             quiz = generate_quiz(text[:12000])
 
-            if not quiz:
+            if not quiz or not quiz.strip():
                 return Response(
                     {"error": "Quiz generation returned an empty result."},
-                    status=502
+                    status=status.HTTP_502_BAD_GATEWAY,
                 )
 
             return Response({
                 "title": document.title,
-                "quiz": quiz
+                "quiz": quiz.strip(),
             })
 
         except Document.DoesNotExist:
-            return Response({"error": "Document not found."}, status=404)
+            return Response(
+                {"error": "Document not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        except FileNotFoundError:
+            logger.exception(
+                "PDF file not found for quiz, document %s",
+                pk,
+            )
+            return Response(
+                {"error": "PDF file not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        except ValueError as error:
+            return Response(
+                {"error": str(error)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         except Exception:
-            logger.exception("QUIZ GENERATION FAILED for PDF %s", pk)
+            logger.exception("Quiz generation failed for PDF %s", pk)
             return Response(
-                {"error": "Quiz generation failed. Check Render logs."},
-                status=500
+                {"error": "Quiz generation failed. Please try again."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
 
+# --------------------------------------------------
+# GENERATE FLASHCARDS
+# --------------------------------------------------
 
 class GenerateFlashcardsView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, pk):
         try:
-            document = Document.objects.get(id=pk)
+            document = get_user_document(request, pk)
 
-            print("FLASHCARD DEBUG: Document found:", document.title)
-
-            text = extract_text_from_pdf(document.pdf.path)
-
-            print("FLASHCARD DEBUG: Extracted text length:", len(text))
+            text = extract_document_text(document)
 
             if not text or not text.strip():
                 return Response(
-                    {"error": "No readable text found in PDF."},
-                    status=400
+                    {"error": "No readable text found in this PDF."},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
 
             flashcards = generate_flashcards(text[:12000])
 
-            print("FLASHCARD DEBUG: Generation successful")
+            if not flashcards or not flashcards.strip():
+                return Response(
+                    {
+                        "error": (
+                            "Flashcard generation returned an empty result."
+                        )
+                    },
+                    status=status.HTTP_502_BAD_GATEWAY,
+                )
 
             return Response({
                 "title": document.title,
-                "flashcards": flashcards
+                "flashcards": flashcards.strip(),
             })
 
-        except Exception as e:
-            import traceback
-
-            print("FLASHCARD ERROR:", repr(e))
-            traceback.print_exc()
-
+        except Document.DoesNotExist:
             return Response(
-                {"error": str(e)},
-                status=500
+                {"error": "Document not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        except FileNotFoundError:
+            logger.exception(
+                "PDF file not found for flashcards, document %s",
+                pk,
+            )
+            return Response(
+                {"error": "PDF file not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        except ValueError as error:
+            return Response(
+                {"error": str(error)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        except Exception:
+            logger.exception(
+                "Flashcard generation failed for PDF %s",
+                pk,
+            )
+            return Response(
+                {
+                    "error": (
+                        "Flashcard generation failed. Please try again."
+                    )
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
 
+# --------------------------------------------------
+# DASHBOARD STATISTICS
+# --------------------------------------------------
+
 class DashboardStatsView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
+        total_pdfs = Document.objects.filter(
+            user=request.user
+        ).count()
 
-        total_pdfs = Document.objects.count()
-
-        data = {
+        return Response({
             "pdfs": total_pdfs,
-            "notes": total_pdfs,
-            "quizzes": total_pdfs,
-            "flashcards": total_pdfs,
-            "chats": total_pdfs,
-        }
-
-        return Response(data)
+            "notes": 0,
+            "quizzes": 0,
+            "flashcards": 0,
+            "chats": 0,
+        })
