@@ -1,4 +1,4 @@
-
+from .llm import client, MODEL_NAME
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from .note_generator import generate_notes
@@ -99,7 +99,7 @@ USER QUESTION
 """
 
             response = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+                model=MODEL_NAME,
                 messages=[
                     {
                         "role": "user",
@@ -190,7 +190,7 @@ DOCUMENT
 """
 
         response = client.chat.completions.create(
-    model="llama-3.3-70b-versatile",
+    model=MODEL_NAME,
     messages=[
         {
             "role": "user",

@@ -16,5 +16,4 @@ client = Groq(
     max_retries=1,
 )
 
-# Keep the model configurable through Render environment variables.
-MODEL_NAME = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+MODEL_NAME = "openai/gpt-oss-120b"

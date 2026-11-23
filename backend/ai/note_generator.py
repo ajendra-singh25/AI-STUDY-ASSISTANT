@@ -1,6 +1,6 @@
 def generate_notes(text):
 
-    from .llm import client
+    from .llm import client, MODEL_NAME
 
     prompt = f"""
 You are an expert study assistant.
@@ -20,7 +20,7 @@ Content:
 """
 
     response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model=MODEL_NAME,
         messages=[
             {
                 "role": "user",
