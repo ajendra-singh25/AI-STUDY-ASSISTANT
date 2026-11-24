@@ -79,14 +79,12 @@ class DocumentUploadView(generics.CreateAPIView):
             if not document.pdf:
                 raise ValueError("No PDF file is attached.")
 
-            try:
-                pdf_path = document.pdf.path
-            except (NotImplementedError, ValueError) as error:
-                raise ValueError(
-                    "The uploaded PDF is not accessible through local storage."
-                ) from error
+            document.pdf.open("rb")
 
-            text = extract_text_from_pdf(pdf_path)
+            try:
+               text = extract_text_from_pdf(document.pdf.file)
+            finally:
+               document.pdf.close()
 
             if not text or not text.strip():
                 raise ValueError(

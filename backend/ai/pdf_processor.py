@@ -3,32 +3,53 @@ import fitz  # PyMuPDF
 from pathlib import Path
 
 
-def extract_text_from_pdf(pdf_path):
+def extract_text_from_pdf(pdf_source):
     """
-    Extract text from all pages of a PDF file.
-    Returns extracted text as a single string.
+    Extract text from a local PDF path or a file-like object.
+    Supports both local storage and cloud storage.
     """
 
-    if not pdf_path:
+    if not pdf_source:
         raise ValueError("PDF file path is missing.")
 
-    pdf_path = Path(pdf_path)
-
-    if not pdf_path.exists():
-        raise FileNotFoundError(
-            f"PDF file not found: {pdf_path}"
-        )
-
-    if not pdf_path.is_file():
-        raise ValueError("The provided path is not a file.")
-
-    if pdf_path.suffix.lower() != ".pdf":
-        raise ValueError("The provided file is not a PDF.")
-
     try:
-        extracted_pages = []
+        # Cloud storage or file-like object
+        if hasattr(pdf_source, "read"):
+            pdf_bytes = pdf_source.read()
 
-        with fitz.open(str(pdf_path)) as document:
+            if hasattr(pdf_source, "seek"):
+                pdf_source.seek(0)
+
+            if not pdf_bytes:
+                raise ValueError("The PDF file is empty.")
+
+            pdf_document = fitz.open(
+                stream=pdf_bytes,
+                filetype="pdf",
+            )
+
+        # Local filesystem path
+        else:
+            pdf_path = Path(pdf_source)
+
+            if not pdf_path.exists():
+                raise FileNotFoundError(
+                    f"PDF file not found: {pdf_path}"
+                )
+
+            if not pdf_path.is_file():
+                raise ValueError(
+                    "The provided path is not a file."
+                )
+
+            if pdf_path.suffix.lower() != ".pdf":
+                raise ValueError(
+                    "The provided file is not a PDF."
+                )
+
+            pdf_document = fitz.open(str(pdf_path))
+
+        with pdf_document as document:
 
             if document.is_encrypted:
                 raise ValueError(
@@ -36,9 +57,16 @@ def extract_text_from_pdf(pdf_path):
                 )
 
             if document.page_count == 0:
-                raise ValueError("The PDF contains no pages.")
+                raise ValueError(
+                    "The PDF contains no pages."
+                )
 
-            for page_number, page in enumerate(document, start=1):
+            extracted_pages = []
+
+            for page_number, page in enumerate(
+                document,
+                start=1,
+            ):
                 page_text = page.get_text("text")
 
                 if page_text and page_text.strip():

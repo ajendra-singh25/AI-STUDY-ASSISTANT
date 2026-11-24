@@ -33,11 +33,19 @@ def get_user_document(request, pk):
 def extract_document_text(document):
     """
     Extract readable text from an uploaded PDF.
+    Supports local and cloud storage.
     """
     if not document.pdf:
-        raise ValueError("No PDF file is associated with this document.")
+        raise ValueError(
+            "No PDF file is associated with this document."
+        )
 
-    return extract_text_from_pdf(document.pdf.path)
+    document.pdf.open("rb")
+
+    try:
+        return extract_text_from_pdf(document.pdf.file)
+    finally:
+        document.pdf.close()
 
 
 # --------------------------------------------------
@@ -61,7 +69,10 @@ class ExtractPDFTextView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            chunks = create_vector_store(text, document.id)
+            chunks = create_vector_store(
+                text,
+                document.id,
+            )
 
             return Response({
                 "title": document.title,
@@ -80,6 +91,7 @@ class ExtractPDFTextView(APIView):
                 "PDF file not found for document %s",
                 pk,
             )
+
             return Response(
                 {"error": "PDF file not found. Please upload it again."},
                 status=status.HTTP_404_NOT_FOUND,
@@ -96,6 +108,7 @@ class ExtractPDFTextView(APIView):
                 "PDF extraction or vector-store creation failed for document %s",
                 pk,
             )
+
             return Response(
                 {"error": "PDF processing failed. Please try again."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -110,7 +123,7 @@ class SearchPDFView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, pk):
-        from .rag import search_pdf
+        from .rag import search_pdf, create_vector_store
 
         question = request.query_params.get("q", "").strip()
 
@@ -123,11 +136,34 @@ class SearchPDFView(APIView):
         try:
             document = get_user_document(request, pk)
 
-            docs = search_pdf(
-                document.id,
-                question,
-                k=4,
-            )
+            # Search existing FAISS index.
+            try:
+                docs = search_pdf(
+                    document.id,
+                    question,
+                    k=4,
+                )
+
+            except FileNotFoundError:
+                # Rebuild the index if it disappeared after
+                # a Render restart or deployment.
+                logger.info(
+                    "Vector index missing for document %s. Rebuilding...",
+                    document.id,
+                )
+
+                pdf_text = extract_document_text(document)
+
+                create_vector_store(
+                    pdf_text,
+                    document.id,
+                )
+
+                docs = search_pdf(
+                    document.id,
+                    question,
+                    k=4,
+                )
 
             if not docs:
                 return Response({
@@ -184,12 +220,16 @@ USER QUESTION:
             )
 
             if not response.choices:
-                raise RuntimeError("The AI returned no response.")
+                raise RuntimeError(
+                    "The AI returned no response."
+                )
 
             answer = response.choices[0].message.content
 
             if not answer or not answer.strip():
-                raise RuntimeError("The AI returned an empty answer.")
+                raise RuntimeError(
+                    "The AI returned an empty answer."
+                )
 
             return Response({
                 "pdf": document.title,
@@ -208,22 +248,33 @@ USER QUESTION:
 
         except FileNotFoundError:
             logger.exception(
-                "Vector store missing for PDF %s",
+                "PDF file not found for document %s",
                 pk,
             )
+
             return Response(
                 {
                     "error": (
-                        "PDF vector database not found. "
-                        "Process the PDF again."
+                        "PDF vector database or source file not found. "
+                        "Please check the uploaded PDF."
                     ),
                     "code": "VECTOR_STORE_NOT_FOUND",
                 },
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        except ValueError as error:
+            return Response(
+                {"error": str(error)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         except Exception:
-            logger.exception("AI search failed for PDF %s", pk)
+            logger.exception(
+                "AI search failed for PDF %s",
+                pk,
+            )
+
             return Response(
                 {"error": "AI search failed. Please try again."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -273,6 +324,7 @@ class GenerateNotesView(APIView):
                 "PDF file not found for notes, document %s",
                 pk,
             )
+
             return Response(
                 {"error": "PDF file not found. Please upload it again."},
                 status=status.HTTP_404_NOT_FOUND,
@@ -285,7 +337,11 @@ class GenerateNotesView(APIView):
             )
 
         except Exception:
-            logger.exception("Note generation failed for PDF %s", pk)
+            logger.exception(
+                "Note generation failed for PDF %s",
+                pk,
+            )
+
             return Response(
                 {"error": "Note generation failed. Please try again."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -335,8 +391,9 @@ class GenerateQuizView(APIView):
                 "PDF file not found for quiz, document %s",
                 pk,
             )
+
             return Response(
-                {"error": "PDF file not found."},
+                {"error": "PDF file not found. Please upload it again."},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -347,7 +404,11 @@ class GenerateQuizView(APIView):
             )
 
         except Exception:
-            logger.exception("Quiz generation failed for PDF %s", pk)
+            logger.exception(
+                "Quiz generation failed for PDF %s",
+                pk,
+            )
+
             return Response(
                 {"error": "Quiz generation failed. Please try again."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -401,8 +462,9 @@ class GenerateFlashcardsView(APIView):
                 "PDF file not found for flashcards, document %s",
                 pk,
             )
+
             return Response(
-                {"error": "PDF file not found."},
+                {"error": "PDF file not found. Please upload it again."},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -417,6 +479,7 @@ class GenerateFlashcardsView(APIView):
                 "Flashcard generation failed for PDF %s",
                 pk,
             )
+
             return Response(
                 {
                     "error": (

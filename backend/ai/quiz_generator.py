@@ -5,30 +5,52 @@ from .llm import client, MODEL_NAME
 def generate_quiz(text):
     """
     Generate exactly 10 multiple-choice questions
-    from the supplied study material.
+    in a format compatible with the Quiz.jsx parser.
     """
 
     if not isinstance(text, str) or not text.strip():
         raise ValueError("Study material is empty or invalid.")
 
+    study_material = text[:10000]
+
     prompt = f"""
-Create a professional multiple-choice quiz from the
-following study material.
+Create exactly 10 multiple-choice questions using ONLY
+the study material provided below.
 
-Rules:
-- Generate exactly 10 MCQs.
-- Each question must have exactly four options.
-- Use options A, B, C and D.
-- Clearly mention the correct answer after every question.
-- Keep questions relevant to the supplied material.
-- Do not invent facts.
-- Avoid repeated questions.
-- Use clean Markdown formatting.
-- Provide a short explanation for each correct answer.
+STRICT FORMATTING RULES:
+1. Number questions from 1 to 10.
+2. Every question must have exactly four options.
+3. Use exactly A., B., C. and D. for options.
+4. Write the correct answer as a single letter (A, B, C or D).
+5. Include a short explanation after each answer.
+6. Do not use Markdown tables.
+7. Do not use code blocks.
+8. Do not add introductory or concluding text.
+9. Do not repeat questions.
+10. Do not invent facts outside the study material.
 
-Study Material:
+FOLLOW THIS EXACT FORMAT:
 
-{text}
+1. Write the first question here?
+A. First option
+B. Second option
+C. Third option
+D. Fourth option
+Correct Answer: B
+Explanation: Brief explanation of why B is correct.
+
+2. Write the second question here?
+A. First option
+B. Second option
+C. Third option
+D. Fourth option
+Correct Answer: A
+Explanation: Brief explanation.
+
+Continue in exactly the same format until question 10.
+
+STUDY MATERIAL:
+{study_material}
 """
 
     response = client.chat.completions.create(
@@ -38,7 +60,8 @@ Study Material:
                 "role": "system",
                 "content": (
                     "You are an expert academic quiz generator. "
-                    "Create accurate questions strictly from "
+                    "Follow the requested question format exactly. "
+                    "Generate accurate questions strictly from "
                     "the supplied study material."
                 ),
             },
@@ -47,8 +70,8 @@ Study Material:
                 "content": prompt,
             },
         ],
-        temperature=0.3,
-        max_completion_tokens=2000,
+        temperature=0.2,
+        max_completion_tokens=2500,
     )
 
     if not response.choices:
