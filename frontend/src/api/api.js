@@ -7,7 +7,7 @@ const api = axios.create({
   baseURL: configuredBaseURL
     ? `${configuredBaseURL.replace(/\/+$/, "")}/`
     : "/api/",
-  timeout: 120000,
+  timeout: 300000,
 });
 
 api.interceptors.request.use(

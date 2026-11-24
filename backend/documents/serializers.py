@@ -6,8 +6,24 @@ from .models import Document
 class DocumentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Document
-        fields = ["id", "title", "pdf", "uploaded_at"]
-        read_only_fields = ["id", "uploaded_at"]
+        fields = [
+            "id",
+            "title",
+            "pdf",
+            "uploaded_at",
+            "processing_status",
+            "processing_error",
+            "processed_at",
+            "chunks_created",
+        ]
+        read_only_fields = [
+            "id",
+            "uploaded_at",
+            "processing_status",
+            "processing_error",
+            "processed_at",
+            "chunks_created",
+        ]
 
     def validate_title(self, value):
         value = value.strip()
@@ -42,7 +58,6 @@ class DocumentSerializer(serializers.ModelSerializer):
                 "PDF must be 50 MB or smaller."
             )
 
-        # Check PDF file signature
         try:
             current_position = value.tell()
             value.seek(0)

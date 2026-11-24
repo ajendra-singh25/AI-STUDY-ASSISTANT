@@ -1,8 +1,7 @@
 
 import logging
-import threading
 
-from django.db import close_old_connections, transaction
+from django.utils import timezone
 
 from rest_framework import generics, permissions, status
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -23,101 +22,126 @@ class DocumentUploadView(generics.CreateAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        document = serializer.save(user=request.user)
+        document = serializer.save(
+            user=request.user,
+            processing_status="pending",
+            processing_error="",
+            chunks_created=0,
+            processed_at=None,
+        )
 
-        # Start processing only after the database transaction commits.
-        def start_processing():
-            thread = threading.Thread(
-                target=self.process_document,
-                args=(document.id,),
-                daemon=True,
-            )
-            thread.start()
+        self.process_document(document)
 
-        transaction.on_commit(start_processing)
-
-        document_data = self.get_serializer(document).data
+        document.refresh_from_db()
 
         return Response(
             {
                 "message": (
                     "PDF uploaded successfully. "
-                    "Document processing has started."
+                    + (
+                        "Processing completed successfully."
+                        if document.processing_status == "ready"
+                        else (
+                            "Processing failed: "
+                            + document.processing_error
+                            if document.processing_status == "failed"
+                            else "Processing is still pending."
+                        )
+                    )
                 ),
                 "id": document.id,
                 "title": document.title,
-                "document": document_data,
+                "document": self.get_serializer(document).data,
             },
             status=status.HTTP_201_CREATED,
         )
 
     @staticmethod
-    def process_document(document_id):
-        # Ensure this thread uses fresh database connections.
-        close_old_connections()
-
+    def process_document(document):
         try:
             from ai.pdf_processor import extract_text_from_pdf
             from ai.rag import create_vector_store
 
-            document = Document.objects.get(id=document_id)
-
-            if not document.pdf:
-                logger.error(
-                    "Document %s has no PDF file.",
-                    document_id,
-                )
-                return
-
-            logger.info(
-                "Starting PDF processing for document %s.",
-                document_id,
+            document.processing_status = "processing"
+            document.processing_error = ""
+            document.save(
+                update_fields=[
+                    "processing_status",
+                    "processing_error",
+                ]
             )
 
-            # This requires a storage backend that provides local file paths.
+            logger.info(
+                "Starting processing for document %s",
+                document.id,
+            )
+
+            if not document.pdf:
+                raise ValueError("No PDF file is attached.")
+
             try:
                 pdf_path = document.pdf.path
             except (NotImplementedError, ValueError) as error:
-                logger.exception(
-                    "Local PDF path unavailable for document %s.",
-                    document_id,
-                )
-                return
+                raise ValueError(
+                    "The uploaded PDF is not accessible through local storage."
+                ) from error
 
             text = extract_text_from_pdf(pdf_path)
 
             if not text or not text.strip():
-                logger.error(
-                    "No readable text found in document %s.",
-                    document_id,
+                raise ValueError(
+                    "No readable text was found in the PDF."
                 )
-                return
 
             chunks = create_vector_store(
                 text,
                 document.id,
             )
 
+            if isinstance(chunks, int):
+                chunks_created = chunks
+            elif chunks is not None:
+                chunks_created = len(chunks)
+            else:
+                chunks_created = 0
+
+            document.processing_status = "ready"
+            document.processing_error = ""
+            document.chunks_created = chunks_created
+            document.processed_at = timezone.now()
+
+            document.save(
+                update_fields=[
+                    "processing_status",
+                    "processing_error",
+                    "chunks_created",
+                    "processed_at",
+                ]
+            )
+
             logger.info(
-                "Document %s successfully processed into %s chunks.",
-                document_id,
-                chunks,
+                "Document %s processed successfully. Chunks: %s",
+                document.id,
+                chunks_created,
             )
 
-        except Document.DoesNotExist:
-            logger.warning(
-                "Document %s was deleted before processing.",
-                document_id,
-            )
-
-        except Exception:
+        except Exception as error:
             logger.exception(
-                "PDF processing failed for document %s.",
-                document_id,
+                "Processing failed for document %s",
+                document.id,
             )
 
-        finally:
-            close_old_connections()
+            document.processing_status = "failed"
+            document.processing_error = str(error)[:2000]
+            document.processed_at = timezone.now()
+
+            document.save(
+                update_fields=[
+                    "processing_status",
+                    "processing_error",
+                    "processed_at",
+                ]
+            )
 
 
 class DocumentListView(generics.ListAPIView):

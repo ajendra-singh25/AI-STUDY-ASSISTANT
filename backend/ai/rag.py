@@ -2,6 +2,7 @@
 import os
 import shutil
 import tempfile
+import logging
 from pathlib import Path
 from functools import lru_cache
 
@@ -10,20 +11,66 @@ from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 
+logger = logging.getLogger(__name__)
+
 # --------------------------------------------------
 # PATH CONFIGURATION
 # --------------------------------------------------
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-VECTOR_DB_DIR = Path(
-    os.environ.get(
-        "VECTOR_DB_DIR",
-        str(BASE_DIR / "vector_db"),
-    )
-)
+configured_path = os.environ.get("VECTOR_DB_DIR")
 
-VECTOR_DB_DIR.mkdir(parents=True, exist_ok=True)
+if configured_path:
+    configured_vector_dir = Path(configured_path)
+else:
+    configured_vector_dir = BASE_DIR / "vector_db"
+
+
+def initialize_vector_directory():
+    """
+    Initialize FAISS storage.
+
+    Prefer the configured directory (for example, a Render
+    persistent disk). If it is unavailable, use local storage.
+    """
+
+    try:
+        configured_vector_dir.mkdir(parents=True, exist_ok=True)
+
+        # Verify that the directory is writable.
+        test_file = configured_vector_dir / ".write_test"
+        test_file.touch()
+        test_file.unlink()
+
+        logger.info(
+            "FAISS storage directory: %s",
+            configured_vector_dir,
+        )
+
+        return configured_vector_dir
+
+    except OSError as error:
+        fallback_dir = BASE_DIR / "vector_db"
+
+        logger.warning(
+            "Configured FAISS directory %s is unavailable: %s",
+            configured_vector_dir,
+            error,
+        )
+
+        fallback_dir.mkdir(parents=True, exist_ok=True)
+
+        logger.warning(
+            "Using fallback FAISS directory: %s. "
+            "This storage may be temporary on Render.",
+            fallback_dir,
+        )
+
+        return fallback_dir
+
+
+VECTOR_DB_DIR = initialize_vector_directory()
 
 
 # --------------------------------------------------
@@ -102,7 +149,6 @@ def create_vector_store(text, pdf_id):
         ],
     )
 
-    # Save the new index in a temporary directory first.
     temp_dir = Path(
         tempfile.mkdtemp(
             prefix=f"pdf_{int(pdf_id)}_",
@@ -115,7 +161,6 @@ def create_vector_store(text, pdf_id):
     try:
         vector_store.save_local(str(temp_dir))
 
-        # Preserve the previous index until the new one is ready.
         if backup_path.exists():
             shutil.rmtree(backup_path)
 
@@ -124,8 +169,8 @@ def create_vector_store(text, pdf_id):
 
         try:
             os.replace(temp_dir, pdf_vector_path)
+
         except Exception:
-            # Restore the previous index if replacement fails.
             if backup_path.exists() and not pdf_vector_path.exists():
                 os.replace(backup_path, pdf_vector_path)
             raise
@@ -146,8 +191,7 @@ def create_vector_store(text, pdf_id):
 
 def search_pdf(pdf_id, question, k=4):
     """
-    Search the FAISS index and return the most relevant
-    document chunks for a question.
+    Search the FAISS index and return relevant chunks.
     """
 
     if not isinstance(question, str) or not question.strip():
