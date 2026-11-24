@@ -51,11 +51,11 @@ class DocumentSerializer(serializers.ModelSerializer):
                 "The uploaded PDF is empty."
             )
 
-        max_size = 50 * 1024 * 1024
+        max_size = 5 * 1024 * 1024
 
         if value.size > max_size:
             raise serializers.ValidationError(
-                "PDF must be 50 MB or smaller."
+                "PDF must be 5 MB or smaller."
             )
 
         try:
